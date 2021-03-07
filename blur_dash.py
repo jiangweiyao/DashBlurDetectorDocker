@@ -8,14 +8,16 @@ import cv2
 from io import BytesIO
 import base64
 import numpy as np
+import skimage.exposure
 
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+app.title = 'Blur, Brightness, and Contrast Detector'
 
 app.layout = html.Div([
     html.Div([
-        html.H2('Blur Detector'),
+        html.H2('Blur, Brightness, and Contrast Detector'),
         html.Strong('This application measures the blur of an image using Laplacian Variance'),
     ]),
 
@@ -61,29 +63,18 @@ def parse_contents(contents, filename, date):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     brightness_mean = hsv[...,2].mean()
     
-    lab = cv2.cvtColor(image,cv2.COLOR_BGR2LAB)
-    L,A,B=cv2.split(lab)
-    # compute minimum and maximum in 5x5 region using erode and dilate
-    kernel = np.ones((5,5),np.uint8)
-    min = cv2.erode(L,kernel,iterations = 1)
-    max = cv2.dilate(L,kernel,iterations = 1)
+    contrast_state = skimage.exposure.is_low_contrast(image, fraction_threshold=0.25)
+    if contrast_state:
+        contrast_message = f"This image has low contrast"
+    else:
+        contrast_message = f"This image has good contrast"
 
-    # convert min and max to floats
-    min = min.astype(np.float64)
-    max = max.astype(np.float64)
-
-    # compute local contrast
-    contrast = (max-min)/(max+min)
-
-    # get average across whole image
-    average_contrast = 100*np.mean(contrast)
-    
     return html.Div([
         # HTML images accept base64 encoded strings in the same format
         # that is supplied by the upload
         html.Strong(blur_message),
         html.Br(),
-        html.Strong(f"The contrast of this image is {average_contrast}%"),
+        html.Strong(contrast_message),
         html.Br(),
         html.Strong(f"The brightness of this image is {brightness_mean}"),
         html.Br(),
