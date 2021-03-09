@@ -64,11 +64,20 @@ def parse_contents(contents, filename, date):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     brightness_mean = hsv[...,2].mean()
     
-    contrast_state = skimage.exposure.is_low_contrast(image, fraction_threshold=0.25)
+
+    low_contrast = False
+    threshold = 0
+    while not low_contrast:
+        threshold = round(threshold + 0.025, 3)
+        low_contrast = skimage.exposure.is_low_contrast(image, fraction_threshold=threshold)
+
+    print(threshold)
+    contrast_state = threshold < 0.25
+    print(contrast_state)
     if contrast_state:
-        contrast_message = f"This image has low contrast"
+        contrast_message = f"This image has low contrast. Contrast level is {threshold}."
     else:
-        contrast_message = f"This image has good contrast"
+        contrast_message = f"This image has good contrast. Contrast level is {threshold}."
 
     return html.Div([
         # HTML images accept base64 encoded strings in the same format

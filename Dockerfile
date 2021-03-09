@@ -13,4 +13,4 @@ RUN conda env export --name base > base.yml
 
 EXPOSE 8050
 
-CMD ["python", "blur_dash.py"]
+CMD ["gunicorn", "-b", "0.0.0.0:8050", "blur_dash:server"]
