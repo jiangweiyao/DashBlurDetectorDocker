@@ -9,12 +9,30 @@ from io import BytesIO
 import base64
 import numpy as np
 import skimage.exposure
+import PIL.Image as Image
+
+import torch
+import torchvision
+from torchvision import datasets, models, transforms
+import pandas as pd
 
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 app.title = 'Blur, Brightness, and Contrast Detector'
 server = app.server
+
+
+device = torch.device('cpu')
+model = torch.load('model_conv_6classes.pth', map_location=device)
+labels = np.array(open("class.txt").read().splitlines())
+
+preprocess = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+])
 
 app.layout = html.Div([
     html.Div([
@@ -51,11 +69,14 @@ def parse_contents(contents, filename, date):
     encoded_image = contents.split(",")[1]
     decoded_image = base64.b64decode(encoded_image)
     bytes_image = BytesIO(decoded_image)
-    #image = Image.open(bytes_image).convert('RGB')
+    image_pil = Image.open(bytes_image).convert('RGB')
     image = cv2.imdecode(np.frombuffer(decoded_image, np.uint8), 1)
 
+    blur_threshold = 100
+    contrast_threshold = 0.25
+
     blur_measure = cv2.Laplacian(image, cv2.CV_64F).var()
-    if blur_measure < 100:
+    if blur_measure < blur_threshold:
         blur_message = f"This image is too blurry. The blur measure for this image is {blur_measure}"
     else:
         blur_message = f"This image is clear. The blur measure for this image is {blur_measure}"
@@ -72,12 +93,23 @@ def parse_contents(contents, filename, date):
         low_contrast = skimage.exposure.is_low_contrast(image, fraction_threshold=threshold)
 
     print(threshold)
-    contrast_state = threshold < 0.25
+    contrast_state = threshold > contrast_threshold
     print(contrast_state)
     if contrast_state:
-        contrast_message = f"This image has low contrast. Contrast level is {threshold}."
-    else:
         contrast_message = f"This image has good contrast. Contrast level is {threshold}."
+    else:
+        contrast_message = f"This image has low contrast. Contrast level is {threshold}."
+
+    if blur_measure > blur_threshold and threshold > contrast_threshold:
+        img = preprocess(image_pil)
+        img = img.unsqueeze(0)
+        pred = model(img)
+        print(pred.detach().numpy())
+        df = pd.DataFrame({'class':labels, 'probability':pred[0].detach().numpy()})
+        output_table = generate_table(df.sort_values(['probability'], ascending=[False]))
+    else:
+        output_table = html.Strong(f"Please retake your image")
+
 
     return html.Div([
         # HTML images accept base64 encoded strings in the same format
@@ -90,6 +122,20 @@ def parse_contents(contents, filename, date):
         html.Br(),
         html.Img(src=contents),
         html.Hr(),
+        output_table
+    ])
+
+
+def generate_table(dataframe, max_rows=10):
+    return html.Table([
+        html.Thead(
+            html.Tr([html.Th(col) for col in dataframe.columns])
+        ),
+        html.Tbody([
+            html.Tr([
+                html.Td(dataframe.iloc[i][col]) for col in dataframe.columns
+            ]) for i in range(min(len(dataframe), max_rows))
+        ])
     ])
 
 
