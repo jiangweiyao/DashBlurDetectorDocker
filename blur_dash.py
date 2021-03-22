@@ -72,7 +72,7 @@ def parse_contents(contents, filename, date):
     image_pil = Image.open(bytes_image).convert('RGB')
     image = cv2.imdecode(np.frombuffer(decoded_image, np.uint8), 1)
 
-    blur_threshold = 100
+    blur_threshold = 30
     contrast_threshold = 0.25
 
     blur_measure = cv2.Laplacian(image, cv2.CV_64F).var()
@@ -104,7 +104,7 @@ def parse_contents(contents, filename, date):
         img = preprocess(image_pil)
         img = img.unsqueeze(0)
         pred = model(img)
-        print(pred.detach().numpy())
+        #print(pred.detach().numpy())
         prediction = labels[torch.argmax(pred)]
         #output_text = html.Strong(f"Prediction is {prediction}")
         if prediction in ["akiec", "bcc", "mel"]:
@@ -118,7 +118,14 @@ def parse_contents(contents, filename, date):
         output_table = generate_table(df.sort_values(['probability'], ascending=[False]))
     else:
         output_text = html.H4(f"Please retake your image")
-        output_table = html.H4(f"Please retake your image")
+        img = preprocess(image_pil)
+        img = img.unsqueeze(0)
+        pred = model(img)
+        #print(pred.detach().numpy())
+        prediction = labels[torch.argmax(pred)]
+
+        df = pd.DataFrame({'class':labels, 'probability':pred[0].detach().numpy()})
+        output_table = generate_table(df.sort_values(['probability'], ascending=[False]))
 
 
     return html.Div([
@@ -134,7 +141,7 @@ def parse_contents(contents, filename, date):
         html.Br(),
         html.Img(src=contents),
         html.Hr(),
-        #output_table
+        output_table
     ])
 
 
