@@ -19,7 +19,7 @@ import pandas as pd
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
-app.title = 'Blur, Brightness, and Contrast Detector'
+app.title = 'Skin Lesion Photo Classifier'
 server = app.server
 
 
@@ -36,8 +36,8 @@ preprocess = transforms.Compose([
 
 app.layout = html.Div([
     html.Div([
-        html.H2('Blur, Brightness, and Contrast Detector'),
-        html.Strong('This application measures the blur of an image using Laplacian Variance'),
+        html.H2('Skin Lesion Photo Classifier'),
+        html.Strong('This application takes an ISIC image, and tells you whether the image needs to be retaken because it is too blurry and low contrast. If the image is good enough, it will tell you whether to schedule the patient for a consultation.' ),
     ]),
 
     dcc.Upload(
@@ -105,15 +105,27 @@ def parse_contents(contents, filename, date):
         img = img.unsqueeze(0)
         pred = model(img)
         print(pred.detach().numpy())
+        prediction = labels[torch.argmax(pred)]
+        #output_text = html.Strong(f"Prediction is {prediction}")
+        if prediction in ["akiec", "bcc", "mel"]:
+            output_text = html.H4(f"Please schedule patient for a consultation.")
+        elif prediction in ["bkl", "df", "nv", "vasc"]:
+            output_text = html.H4(f"Patient does not need another appointment.")
+        else:
+            output_text = html.H4(f"Something went wrong")
+
         df = pd.DataFrame({'class':labels, 'probability':pred[0].detach().numpy()})
         output_table = generate_table(df.sort_values(['probability'], ascending=[False]))
     else:
-        output_table = html.Strong(f"Please retake your image")
+        output_text = html.H4(f"Please retake your image")
+        output_table = html.H4(f"Please retake your image")
 
 
     return html.Div([
         # HTML images accept base64 encoded strings in the same format
         # that is supplied by the upload
+        output_text,
+        html.Br(),
         html.Strong(blur_message),
         html.Br(),
         html.Strong(contrast_message),
@@ -122,7 +134,7 @@ def parse_contents(contents, filename, date):
         html.Br(),
         html.Img(src=contents),
         html.Hr(),
-        output_table
+        #output_table
     ])
 
 
