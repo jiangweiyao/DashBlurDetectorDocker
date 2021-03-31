@@ -14,6 +14,7 @@ import PIL.Image as Image
 import torch
 import torchvision
 from torchvision import datasets, models, transforms
+import torch.nn.functional as F
 import pandas as pd
 
 external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
@@ -25,6 +26,7 @@ server = app.server
 
 device = torch.device('cpu')
 model = torch.load('model_conv_6classes.pth', map_location=device)
+fullname = np.array(open("fullname.txt").read().splitlines())
 labels = np.array(open("class.txt").read().splitlines())
 
 preprocess = transforms.Compose([
@@ -37,7 +39,9 @@ preprocess = transforms.Compose([
 app.layout = html.Div([
     html.Div([
         html.H2('Skin Lesion Photo Classifier'),
-        html.Strong('This application takes an ISIC image, and tells you whether the image needs to be retaken because it is too blurry and low contrast. If the image is good enough, it will tell you whether to schedule the patient for a consultation.' ),
+        html.Strong('This application detects whether an image needs to be retaken because it is too blurry and/or low contrast.', style={'fontSize': 18}),
+        html.Br(),
+        html.Strong('If the image is good enough, it will tell you whether to schedule the patient for a consultation.', style={'fontSize': 18}) 
     ]),
 
     dcc.Upload(
@@ -76,11 +80,10 @@ def parse_contents(contents, filename, date):
     contrast_threshold = 0.25
 
     blur_measure = cv2.Laplacian(image, cv2.CV_64F).var()
-    if blur_measure < blur_threshold:
-        blur_message = f"This image is too blurry. The blur measure for this image is {blur_measure}"
+    if blur_measure > blur_threshold:
+        blur_message = f"This image is clear. The Laplacian variance is {blur_measure:.2f}, which is greater than the threshold of {blur_threshold:.2f}. Higher is better."
     else:
-        blur_message = f"This image is clear. The blur measure for this image is {blur_measure}"
-
+        blur_message = f"This image is too blurry. The Laplacian variance is {blur_measure:.2f}, which is less than the threshold of {blur_threshold:.2f}. Higher is better."
 
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     brightness_mean = hsv[...,2].mean()
@@ -89,57 +92,50 @@ def parse_contents(contents, filename, date):
     low_contrast = False
     threshold = 0
     while not low_contrast:
-        threshold = round(threshold + 0.025, 3)
+        threshold = round(threshold + 0.02, 3)
         low_contrast = skimage.exposure.is_low_contrast(image, fraction_threshold=threshold)
 
-    print(threshold)
-    contrast_state = threshold > contrast_threshold
-    print(contrast_state)
-    if contrast_state:
-        contrast_message = f"This image has good contrast. Contrast level is {threshold}."
+    if threshold > contrast_threshold:
+        contrast_message = f"This image has good contrast. The Gamma is {threshold:.2f}, which is greater than the threshold of {contrast_threshold:.2f}. Gamma range from 0 to 1, and higher is better."
     else:
-        contrast_message = f"This image has low contrast. Contrast level is {threshold}."
+        contrast_message = f"This image has low contrast. The Gamma is {threshold:.2f}, which is less than the threshold of {contrast_threshold:.2f}. Gamma range from 0 to 1, and higher is better."
+
+
+    img = preprocess(image_pil)
+    img = img.unsqueeze(0)
+    pred = model(img)
+    #print(pred.detach().numpy())
+    prediction = labels[torch.argmax(pred)]
+    prob = F.softmax(pred, dim=1)
+    df = pd.DataFrame({'Class':fullname, 'Probability':prob[0].detach().numpy()*100})
+    output_table = generate_table(df.sort_values(['Probability'], ascending=[False]))
+
+
 
     if blur_measure > blur_threshold and threshold > contrast_threshold:
-        img = preprocess(image_pil)
-        img = img.unsqueeze(0)
-        pred = model(img)
-        #print(pred.detach().numpy())
-        prediction = labels[torch.argmax(pred)]
-        #output_text = html.Strong(f"Prediction is {prediction}")
         if prediction in ["akiec", "bcc", "mel"]:
-            output_text = html.H4(f"Please schedule patient for a consultation.")
+            output_text = html.H4(f"Please schedule patient for a consultation.", style={'color': 'blue', 'font-weight' : 'bold' })
         elif prediction in ["bkl", "df", "nv", "vasc"]:
-            output_text = html.H4(f"Patient does not need another appointment.")
+            output_text = html.H4(f"Patient does not need another appointment.", style={'color': 'green', 'font-weight' : 'bold' })
         else:
             output_text = html.H4(f"Something went wrong")
 
-        df = pd.DataFrame({'class':labels, 'probability':pred[0].detach().numpy()})
-        output_table = generate_table(df.sort_values(['probability'], ascending=[False]))
-    else:
-        output_text = html.H4(f"Please retake your image")
-        img = preprocess(image_pil)
-        img = img.unsqueeze(0)
-        pred = model(img)
-        #print(pred.detach().numpy())
-        prediction = labels[torch.argmax(pred)]
 
-        df = pd.DataFrame({'class':labels, 'probability':pred[0].detach().numpy()})
-        output_table = generate_table(df.sort_values(['probability'], ascending=[False]))
+    else:
+        output_text = html.H4(f"Please retake your image", style={'color': 'red', 'font-weight' : 'bold' })
 
 
     return html.Div([
         # HTML images accept base64 encoded strings in the same format
         # that is supplied by the upload
         output_text,
-        html.Br(),
         html.Strong(blur_message),
         html.Br(),
         html.Strong(contrast_message),
+        #html.Br(),
+        #html.Strong(f"The brightness of this image is {brightness_mean}"),
         html.Br(),
-        html.Strong(f"The brightness of this image is {brightness_mean}"),
-        html.Br(),
-        html.Img(src=contents),
+        html.Img(src=contents, style={"max-height" : "500px" }),
         html.Hr(),
         output_table
     ])
@@ -152,7 +148,8 @@ def generate_table(dataframe, max_rows=10):
         ),
         html.Tbody([
             html.Tr([
-                html.Td(dataframe.iloc[i][col]) for col in dataframe.columns
+                #html.Td(dataframe.iloc[i][col]) for col in dataframe.columns
+                html.Td(dataframe.iloc[i][0]), html.Td("{:.2f}%".format(dataframe.iloc[i][1]), style={'text-align' : 'right'}) 
             ]) for i in range(min(len(dataframe), max_rows))
         ])
     ])
